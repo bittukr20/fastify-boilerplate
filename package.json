@@ -80,9 +80,11 @@
     "start:dev": "NODE_ENV=development nodemon -e js index | pino-pretty -c -t -l severity",
     "start": "node --max-http-header-size 24000 src/index",
     "test:unit": "LOG_LEVEL=silent jest -c jest.config.unit.js",
+    "test:e2e": "jest -c jest.config.e2e.js",
     "knex": "node -r dotenv/config ./node_modules/.bin/knex",
     "migrate:make": "npm run knex -- migrate:make --knexfile ./config/knexConfig.js",
     "migrate": "npm run knex -- migrate:latest --knexfile ./config/knexConfig.js",
+    "migrate:test": "DOTENV_CONFIG_PATH=tests/.test.env DOTENV_CONFIG_OVERRIDE=true npm run migrate",
     "migrate:down": "npm run knex -- migrate:down --knexfile ./config/knexConfig.js",
     "prepare": "husky install"
   },

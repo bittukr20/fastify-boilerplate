@@ -18,7 +18,7 @@ Stack: Node.js >= 20, Fastify 5, Knex + PostgreSQL, Jest, ESLint (airbnb-base) +
 2. **API first.** For a new endpoint, write the schema (the contract) before the implementation.
 3. **Add only what was asked.** No extra endpoints, options or abstractions "just in case".
 4. **Explain trade-offs** when you suggest a structural change, and ask before restructuring.
-5. **Finish with the checks.** Run `npm run lint:fix` and `npm run test:unit`. Fix what they report.
+5. **Finish with the checks.** Run `npm run lint:fix` and `npm run test:unit`, and `npm run test:e2e` when an endpoint, schema, migration or error handling changed. Fix what they report.
 6. **Never commit secrets.** No `.env`, credentials or service-account files.
 
 ## Commands
@@ -26,8 +26,10 @@ Stack: Node.js >= 20, Fastify 5, Knex + PostgreSQL, Jest, ESLint (airbnb-base) +
 ```bash
 npm run start:dev                # nodemon + pretty logs (needs PostgreSQL, see .env.example)
 npm run test:unit                # Jest unit tests + coverage (threshold 50%)
+npm run test:e2e                 # integration tests against the existing PostgreSQL database "test" (tests/.test.env). Run `npm run migrate:test` first
 npm run lint:fix                 # ESLint + Prettier with auto-fix. ALWAYS run after changes
 npm run migrate                  # run pending Knex migrations
+npm run migrate:test             # run pending migrations on the E2E test database (needed before test:e2e)
 npm run migrate:make -- <name>   # create a new migration (timestamped file)
 npm run migrate:down             # roll back the last migration
 ```
@@ -83,7 +85,8 @@ src/
     └── utils/                   # DateTimeFormatter
 ```
 
-Tests live in a `__tests__/` folder next to the code they test (`*.test.js`). Mocks live in `__mocks__/`.
+Unit tests live in a `__tests__/` folder next to the code they test (`*.test.js`). Mocks live in `__mocks__/`.
+Integration (E2E) tests live in `tests/e2e/<feature>/`, with seed data in `tests/testdata/` (see "Integration (E2E) tests").
 
 ---
 
@@ -104,6 +107,10 @@ When adding code, open the matching file first and mirror it.
 | A service unit test | `src/app/users/services/__tests__/createUsers.test.js` |
 | A repository unit test | `src/app/users/repository/__tests__/users.test.js` |
 | An HTTP-level handler test | `src/app/users/handlers/__tests__/createUsers.test.js` |
+| An integration (E2E) test file | `tests/e2e/users/users.e2e.test.js` |
+| A golden response file | `tests/e2e/users/__mocks__/create_user_duplicate_name.response.mock.json` |
+| E2E seed and teardown data | `tests/testdata/seed.sql` and `tests/testdata/teardown.sql` |
+| E2E helpers | `tests/e2e/testutil/testutil.js` |
 | A migration | `migrations/20211120172347_create_table_user.js` |
 | A plugin | any folder in `src/app/plugins/` (e.g. `cloudTask/` with its test) |
 
@@ -120,9 +127,9 @@ When adding code, open the matching file first and mirror it.
 - **Small, single-purpose functions.** Extract a named function for any distinct step. Never inline a
   self-contained loop or conditional inside a service function.
 - **Complexity <= 5, nesting depth <= 2.** Use early returns to flatten logic.
-- **Verb-prefixed names:** `getOrderById`, `buildInsertInput`, `checkIsValidPromotion`.
+- **Verb-prefixed names:** `getOrderById`, `buildInsertInput`, `checkIsValidAddress`.
 - **Meaningful variable names.** Say what the variable holds. Never `res`, `tmp`, `arr`, `obj`, `jr`.
-  Good: `promotionApplications`, `couponIdToPromotionApplicationsMap`.
+  Good: `userAddresses`, `userIdToAddressesMap`.
 - **No duplication.** Repeated logic moves into a helper.
 - **Write for a junior reader.** Prefer explicit code over clever one-liners.
 - **No raw string discriminators.** Values such as `"FIXED"` or `"USER_CREATED"` go in a
@@ -349,7 +356,7 @@ Audit fields: `getAuditInfo(entity)` from `commons/helpers.js` (adds `created_at
 
 ## Testing
 
-- Unit tests only. Mock Fastify plugins and repositories, test the service or helper in isolation.
+- **Unit tests** mock Fastify plugins and repositories and test the service or helper in isolation. The next section covers integration tests, which use a real database.
 - Name: `<thing>.test.js`, inside `__tests__/` next to the code.
 - Mock repos with `jest.mock("../../repository/users")` and assert on the named functions.
 - Use the shared Knex chain mock in `repository/__mocks__/knex.mock.js` for repository tests.
@@ -358,6 +365,53 @@ Audit fields: `getAuditInfo(entity)` from `commons/helpers.js` (adds `created_at
 - Test the behaviour that matters: the happy path, each business rule, and each error you throw.
 
 ---
+
+## Integration (E2E) tests
+
+Integration tests run the **real app against a real PostgreSQL**, using Fastify `inject`, seeded data and
+golden files. They check the whole contract: validation, status codes, error shapes and what is really stored.
+
+```bash
+npm run migrate:test        # prerequisite: latest migrations on the test database (also after adding a migration)
+npm run test:e2e            # run all integration tests
+npm run test:e2e -- tests/e2e/users            # one folder
+npm run test:e2e -- -t "creates a user"        # one test by name
+```
+
+### When to write one
+- **Every new endpoint** gets E2E tests: the success case (and check the stored row with `queryRows`), and one test
+  per error status the endpoint can return (400 validation, 404, 409, ...).
+- Business rules that touch several rows or tables (transactions) get an E2E test that reads the database back.
+- Use unit tests for logic and E2E tests for the contract. Do not repeat every unit test as an E2E test.
+
+### How a test file looks
+```javascript
+const testutil = require("../testutil/testutil");
+
+beforeAll(() => testutil.initServer());
+afterAll(() => testutil.teardownServer());
+
+test("returns 409 when the user already exists", async () => {
+  const { statusCode, body } = await testutil.postJson({ path: "/v1/users", body: existingUserBody });
+
+  expect(statusCode).toBe(409);
+  testutil.assertJsonEqual({
+    expected: testutil.loadMockJson({ directory: __dirname, fileName: "create_user_duplicate_name.response.mock.json" }),
+    actual: body
+  });
+});
+```
+
+### Rules
+1. **Real database only, and only a `_test` one.** The tests refuse to run on any database whose name is not `test` or does not end with `_test`. Never weaken this check. Never `TRUNCATE`.
+2. **Deterministic seed data.** Seed rows have fixed ids (for example `a0000001-0000-0000-0000-000000000001`). Put them in `tests/testdata/seed.sql`, or in `<feature>_seed.sql` and `<feature>_teardown.sql` passed to `initServer({ seedFileName, teardownFileName })`.
+3. **Every seeded or created row must be removed by teardown.** Add the deletes to the teardown file, child tables first, by explicit id. Rows created by tests use a name prefix (see `buildUniqueUserName`) that teardown deletes by pattern.
+4. **Unique data per test.** Build names and ids with a helper. Never share mutable state between tests.
+5. **Golden files for error and list responses:** `tests/e2e/<feature>/__mocks__/<scenario>.response.mock.json`. Use `ignoreKeys` for generated values (ids, timestamps). Use `ignoreArrayOrder` only when the order is not part of the contract.
+6. **Check the database, not only the response.** After a write, read the row back with `queryRows`. After a rejected request, check that nothing was written.
+7. **Quiet logs.** `tests/.test.env` sets `LOG_LEVEL=silent`. Raise it to `info` only while debugging.
+8. **Run `npm run migrate:test` before `npm run test:e2e`.** The tests do not migrate the database; they fail if migrations are pending. Run `npm run test:e2e` after changing an endpoint, a schema, a migration or error handling.
+9. Add every new test to `tests/e2e/E2E_TEST_CASES.md`.
 
 ## Recipe: add a new endpoint
 
@@ -371,8 +425,9 @@ Example: `GET /v1/users/:userId` (a good practice exercise: nothing exists for i
    when the user does not exist, return the transformed response.
 5. **Handler.** `handlers/getUserById.js`. Export it from `handlers/index.js`.
 6. **Route.** Register it in `routes/index.js`.
-7. **Tests.** Service test (found and not-found), repository test, transformer test.
-8. **Verify.** `npm run lint:fix` then `npm run test:unit`.
+7. **Unit tests.** Service test (found and not-found), repository test, transformer test.
+8. **Integration tests.** In `tests/e2e/users/`: add seed rows if needed, then tests for the success case (with a database check) and for 404. Add golden files for the error responses.
+9. **Verify.** `npm run lint:fix`, `npm run test:unit` and `npm run test:e2e`.
 
 ## Recipe: add a new module
 
@@ -386,6 +441,7 @@ add a migration with `npm run migrate:make -- create_table_<name>`.
 
 - [ ] `npm run lint:fix` is clean
 - [ ] `npm run test:unit` passes
+- [ ] `npm run test:e2e` passes, and new endpoints have E2E tests with golden files for their errors
 - [ ] No `let` (except `for` counters), no `for...of`, no raw `new Date()`
 - [ ] Every function takes one destructured object (framework signatures excepted)
 - [ ] No database calls in loops, no `try/catch` outside transactions

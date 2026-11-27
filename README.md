@@ -190,8 +190,10 @@ To use one, add `await fastify.register(require("./app/plugins/<name>"));` in `s
 | --- | --- |
 | `npm run start:dev` | Run with nodemon and pretty logs |
 | `npm run test:unit` | Jest unit tests with coverage (threshold 50%) |
+| `npm run test:e2e` | Integration tests against a real PostgreSQL (see [Integration tests](#integration-tests-e2e)) |
 | `npm run lint:fix` | ESLint + Prettier with auto-fix. Run it after every change |
 | `npm run migrate` | Run pending migrations |
+| `npm run migrate:test` | Run pending migrations on the E2E test database (`tests/.test.env`) |
 | `npm run migrate:make -- <name>` | Create a new migration |
 | `npm run migrate:down` | Roll back the last migration |
 
@@ -225,7 +227,7 @@ Short version (the full recipe is in [`CLAUDE.md`](./CLAUDE.md)):
 3. `services/<endpoint>.js`, the business logic
 4. `handlers/<endpoint>.js`, then export it from `handlers/index.js`
 5. Register the route in `routes/index.js`
-6. Add tests, then run `npm run lint:fix` and `npm run test:unit`
+6. Add unit tests and an integration test, then run `npm run lint:fix`, `npm run test:unit` and `npm run test:e2e`
 
 **Practice exercise:** add `GET /v1/users/:userId` end to end: schema, repository query, service
 (throw a 404 `CustomError` when the user does not exist), handler, route and tests.
@@ -259,6 +261,59 @@ Add a "customers" module with create and get endpoints, a migration, and tests.
 Treat Claude's output like any teammate's: lint, the tests and code review still decide what ships.
 
 ---
+
+## Integration tests (E2E)
+
+Unit tests mock the database. The integration tests do not: they run the **real app against a real
+PostgreSQL database**, send real HTTP requests to it, and check both the responses and what was written
+to the database.
+
+**Prerequisites**
+
+1. An existing PostgreSQL database named `test` (for example `createdb test`), configured in `tests/.test.env`.
+2. **The latest migrations applied to it.** The tests never change the schema. Run this before the tests,
+   and again whenever you add a migration:
+
+```bash
+npm run migrate:test        # same as npm run migrate, but against the database in tests/.test.env
+npm run test:e2e            # seed data, run the tests, clean up
+```
+
+If migrations are pending, the tests stop at the start and tell you to run `npm run migrate:test`.
+
+Run one file or one test:
+
+```bash
+npm run test:e2e -- tests/e2e/users
+npm run test:e2e -- -t "creates a user"
+```
+
+**How it works**
+
+- Each test file calls `initServer()` in `beforeAll` and `teardownServer()` in `afterAll`. `initServer()`
+  removes stale data, loads `tests/testdata/seed.sql` and starts the real app in-process (Fastify `inject`).
+- The schema must already be migrated (see the prerequisites). The tests check this once and stop with a clear message if it is not.
+- Seed rows have fixed ids. Teardown deletes them by explicit id (child tables first), never `TRUNCATE`.
+- Expected error and list responses live in **golden files**: `tests/e2e/<feature>/__mocks__/*.response.mock.json`.
+- Test files run one after another because they share one database. Tests use unique names, so they never clash.
+- **Safety:** the tests refuse to run unless the connected database is named `test` or ends with `_test`, so
+  they can never wipe a development database.
+
+**Settings:** `tests/.test.env` holds the test database connection (like `.test.env` in the Go services). It is separate from your `.env`.
+
+```
+tests/
+├── .test.env                    # test database settings (overrides .env)
+├── testdata/
+│   ├── seed.sql                 # fixed-id rows used by the tests
+│   └── teardown.sql             # deletes everything the tests created
+└── e2e/
+    ├── testutil/testutil.js     # initServer, postJson, getJson, queryRows, assertJsonEqual, ...
+    ├── E2E_TEST_CASES.md        # list of every test case
+    └── users/
+        ├── users.e2e.test.js
+        └── __mocks__/           # golden response files
+```
 
 ## Logging
 

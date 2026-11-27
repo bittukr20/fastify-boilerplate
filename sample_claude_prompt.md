@@ -17,7 +17,8 @@ the two inputs and keep the rest. See [Reuse it for your own entity](#reuse-it-f
 1. Open a terminal in the repo root and start Claude Code: `claude`
 2. Copy the prompt below and paste it.
 3. Claude reads `CLAUDE.md`, then replies with a **short plan**. Check it, then answer `go`.
-4. Claude builds the module, runs `npm run lint:fix` and `npm run test:unit`, and summarises what it did.
+4. Claude builds the module, runs `npm run lint:fix`, `npm run test:unit` and `npm run test:e2e`, and summarises what it did.
+   (Prerequisite: an existing PostgreSQL database named `test` (see `tests/.test.env`) with the latest migrations: `npm run migrate:test`.)
 
 > The `@samples/address.json` part is a file reference. Claude Code reads the file for you.
 
@@ -43,6 +44,14 @@ APIS REQUIRED
 | 4 | PATCH  | /v1/addresses/:address_id | Partial update. At least one field is required. user_id cannot be changed                         | 200 the updated address           | 400 validation, 404 ADDRESS_NOT_FOUND |
 | 5 | DELETE | /v1/addresses/:address_id | Delete an address (hard delete)                                                                   | 204 no body                       | 404 ADDRESS_NOT_FOUND                 |
 
+TESTS REQUIRED
+- Unit tests: every service, the transformer and the repository functions.
+- Integration (E2E) tests in tests/e2e/addresses/, following tests/e2e/users and the "Integration (E2E) tests"
+  section of CLAUDE.md. Seed 3 addresses for a seeded user (fixed ids) and add the deletes to teardown. Cover:
+  create (check the stored row), get (200 and 404), paginated list (page size, total, newest first),
+  partial update, delete (204, then 404), the single default address rule, and a 400 for a user_id that
+  does not exist. Use golden files for the error responses.
+
 BUSINESS RULES
 1. A user can have only one default address (is_default = true). When an address is created or updated with
    is_default = true, set is_default = false on that user's other addresses in the SAME transaction.
@@ -64,11 +73,12 @@ HOW TO WORK
 3. Before writing code, show me a SHORT plan: the files you will create, the migration, the 5 endpoints,
    and anything that is unclear. Then wait for my "go".
 4. Implement in this order: schemas, migration, repository, transformer, service, handler, routes,
-   registration in src/index.js, tests.
+   registration in src/index.js, unit tests, then the E2E seed data and tests.
 5. Do not change the users module or any unrelated file. The only existing file you may edit is src/index.js
    (to register the new routes with the /v1 prefix).
-6. When done: run `npm run lint:fix` and `npm run test:unit`, fix any failure, then summarise:
-   the files you created, any assumption you made, and one curl command per endpoint.
+6. When done: run `npm run lint:fix` and `npm run test:unit`. Run `npm run migrate:test`
+   (applies your new migration to the existing `test` database), then `npm run test:e2e`. Fix any failure, then summarise: the files you
+   created, any assumption you made, and one curl command per endpoint.
 ```
 
 ---
@@ -79,6 +89,7 @@ HOW TO WORK
 | --- | --- | --- |
 | **ENTITY** | Points Claude to the field definitions, and fixes the folder name, base path and table name | Entity file, module folder, base path, table name |
 | **APIS REQUIRED** | The contract. One row per endpoint with the exact status codes and errors | The whole table |
+| **TESTS REQUIRED** | What must be proven: unit tests plus integration tests against a real database | The scenarios you care about |
 | **BUSINESS RULES** | The decisions the code cannot guess (uniqueness, defaults, side effects) | Your own rules. Delete the ones that do not apply |
 | **OPTIONS** | Yes/no switches that change the generated code | Flip them to `yes`, for example audit fields or events |
 | **HOW TO WORK** | The process: read the rules, plan first, build in a safe order, stay inside the module, verify | Usually nothing |

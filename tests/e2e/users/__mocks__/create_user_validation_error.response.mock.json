@@ -1,0 +1,14 @@
+{
+  "errors": [
+    {
+      "property": "phone_number",
+      "message": "body must have required property 'phone_number'",
+      "code": "REQUEST_VALIDATION_ERROR"
+    },
+    {
+      "property": "full_name",
+      "message": "body must NOT have fewer than 10 characters",
+      "code": "REQUEST_VALIDATION_ERROR"
+    }
+  ]
+}
