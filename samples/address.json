@@ -1,0 +1,111 @@
+{
+  "entity": "address",
+  "plural": "addresses",
+  "description": "A postal address that belongs to a user. A user can have several addresses, and one of them can be the default.",
+  "table_name": "address",
+  "primary_key": {
+    "api_field": "address_id",
+    "column": "id",
+    "type": "uuid",
+    "generated": true
+  },
+  "fields": [
+    {
+      "name": "user_id",
+      "type": "uuid",
+      "required": true,
+      "immutable": true,
+      "references": "user.id",
+      "description": "Owner of the address. Cannot be changed after the address is created."
+    },
+    {
+      "name": "address_type",
+      "type": "string",
+      "required": true,
+      "enum": ["HOME", "WORK", "OTHER"]
+    },
+    {
+      "name": "line_1",
+      "type": "string",
+      "required": true,
+      "min_length": 3,
+      "max_length": 100,
+      "description": "House or flat number and street"
+    },
+    {
+      "name": "line_2",
+      "type": "string",
+      "max_length": 100,
+      "description": "Apartment, building or area"
+    },
+    {
+      "name": "landmark",
+      "type": "string",
+      "max_length": 100
+    },
+    {
+      "name": "city",
+      "type": "string",
+      "required": true,
+      "max_length": 60
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "required": true,
+      "max_length": 60
+    },
+    {
+      "name": "country",
+      "type": "string",
+      "required": true,
+      "enum": ["IN"],
+      "default": "IN"
+    },
+    {
+      "name": "pincode",
+      "type": "string",
+      "required": true,
+      "pattern": "^[0-9]{6}$",
+      "description": "6 digit postal code"
+    },
+    {
+      "name": "is_default",
+      "type": "boolean",
+      "default": false,
+      "description": "Only one address per user can be the default"
+    },
+    {
+      "name": "geo_location",
+      "type": "object",
+      "stored_as": "jsonb",
+      "description": "Optional map position of the address",
+      "properties": [
+        { "name": "latitude", "type": "number", "required": true, "minimum": -90, "maximum": 90 },
+        { "name": "longitude", "type": "number", "required": true, "minimum": -180, "maximum": 180 }
+      ]
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp",
+      "read_only": true,
+      "generated": true,
+      "description": "Set by the database. Returned in responses, never accepted in requests."
+    }
+  ],
+  "example": {
+    "address_id": "6f1d2c1e-9b6a-4f43-8a5e-3c1f0d9a7b21",
+    "user_id": "0b8f5d3a-2c4e-4d7a-9f10-5a6c7e8d9b01",
+    "address_type": "HOME",
+    "line_1": "12, Gandhi Street",
+    "line_2": "RS Puram",
+    "landmark": "Near the post office",
+    "city": "Coimbatore",
+    "state": "Tamil Nadu",
+    "country": "IN",
+    "pincode": "641002",
+    "is_default": true,
+    "geo_location": { "latitude": 11.0168, "longitude": 76.9558 },
+    "created_at": "2024-01-31T10:15:30.000Z"
+  }
+}
